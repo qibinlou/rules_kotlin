@@ -34,6 +34,10 @@ sh_binary(
     name = "kotlinc",
     srcs = ["bin/kotlinc"],
 )
+sh_binary(
+    name = "kotlinc-js",
+    srcs = ["bin/kotlinc-js"],
+)
 exports_files(["src"])
 """
 

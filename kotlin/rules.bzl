@@ -101,6 +101,92 @@ def _kotlin_compile_impl(ctx):
         ),
     )
 
+def _kotlin_js_compile_impl(ctx):
+    kt_jar = ctx.outputs.kt_jar
+    inputs = []
+
+    args = []
+
+    # Single output jar
+    args += ["-output", kt_jar.path]
+
+    # Include meta-info
+    args += ["-meta-info"]
+
+    # Module type
+    args += ["-module-kind", "umd"]
+
+    # Advanced options
+    args += ["-X%s" % opt for opt in ctx.attr.x_opts]
+
+    # Plugin options
+    for k, v in ctx.attr.plugin_opts.items():
+        args += ["-P"]
+        args += ["plugin:%s=\"%s\"" % (k, v)]
+
+    # Kotlin home - typically the dir
+    # 'external/com_github_jetbrains_kotlin'
+    # args += ["-kotlin-home", ctx.file._kotlin_compiler.dirname + '/..']
+    # Add all home libs to sandbox so they are discoverable by the
+    # preloader
+    inputs += ctx.files._kotlin_home
+
+    args += ctx.attr.args
+
+    # Make classpath if needed.  Include those from this and dependent rules.
+    jars = depset()
+        
+    # Populate from (transitive) kotlin dependencies
+    for dep in ctx.attr.deps:
+        jars += [file for file in dep.kt.transitive_jars]
+
+    # Populate from jar dependencies
+    for fileset in ctx.attr.jars:
+        # The fileset object is either a ConfiguredTarget OR a depset.
+        files = getattr(fileset, 'files', None)
+        if files:
+            jars = jars.union(files)
+        else:
+            jars = jars.union(fileset)
+
+    if jars:
+        # De-duplicate
+        jarlist = depset(jars).to_list()
+        args += ["-libraries", ":".join([f.path for f in jarlist])]
+        inputs += jarlist
+        if ctx.attr.verbose:
+            print("kotlin compile classpath: \n" + "\n".join([file.path for file in jarlist]))
+            
+    # Add in filepaths
+    for file in ctx.files.srcs:
+        inputs += [file]
+        args += [file.path]
+
+
+    if ctx.attr.verbose > 1:
+        print("kotlin compile arguments: \n%s" % "\n".join(args))
+        
+    # Run the compiler
+    ctx.action(
+        mnemonic = "KotlinCompileJs",
+        inputs = inputs,
+        outputs = [kt_jar],
+        # executable = ctx.executable._kotlinc_js,
+        executable = "/usr/local/bin/kotlinc-js",
+        arguments = args,
+        progress_message="Compiling %d Kotlin source files to %s" % (len(ctx.files.srcs), ctx.outputs.kt_jar.short_path)
+    )
+
+    return struct(
+        files = depset([kt_jar]),
+        runfiles = ctx.runfiles(collect_data = True),
+        kt = struct(
+            srcs = ctx.attr.srcs,
+            jar = kt_jar,
+            transitive_jars = [kt_jar] + jars.to_list(),
+        ),
+    )
+
 
 # ################################################################
 # Analysis phase
@@ -174,6 +260,12 @@ _kotlin_compile_attrs = {
         cfg = 'host',
     ),
 
+    "_kotlinc_js": attr.label(
+        default=Label("@com_github_jetbrains_kotlin//:kotlinc-js"),
+        executable = True,
+        cfg = 'host',
+    ),
+
 }
 
 
@@ -181,11 +273,20 @@ _kotlin_compile_outputs = {
     "kt_jar": "%{name}.jar",
 }
 
+_kotlin_compile_js_outputs = {
+    "kt_jar": "%{name}.js",
+}
 
 kotlin_compile = rule(
     implementation = _kotlin_compile_impl,
     attrs = _kotlin_compile_attrs,
     outputs = _kotlin_compile_outputs,
+)
+
+kotlin_js_compile = rule(
+    implementation = _kotlin_js_compile_impl,
+    attrs = _kotlin_compile_attrs,
+    outputs = _kotlin_compile_js_outputs,
 )
 
 
@@ -285,6 +386,25 @@ def kotlin_library(name, jars = [], java_deps = [], visibility = None, **kwargs)
             "@com_github_jetbrains_kotlin//:runtime",
         ],
     )
+
+def kotlin_js_library(name, jars = [], visibility = None, **kwargs):
+
+    kotlin_js_compile(
+        name = name,
+        jars = jars,
+        visibility = visibility,
+        **kwargs
+    )
+
+    native.java_import(
+        name = name + "_kt",
+        jars = [name + ".jar"],
+        visibility = visibility,
+        exports = [
+            "@com_github_jetbrains_kotlin//:runtime",
+        ],
+    )
+
 
 
 def kotlin_binary(name,

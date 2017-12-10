@@ -1,6 +1,6 @@
 package(default_visibility = ["//visibility:public"])
 
-load("//kotlin:rules.bzl", "kotlin_library", "kotlin_binary", "kotlin_test")
+load("//kotlin:rules.bzl", "kotlin_library", "kotlin_binary", "kotlin_test", "kotlin_js_library")
 
 
 # A kotlin binary that depends on another kotlin rule (using kotlin
